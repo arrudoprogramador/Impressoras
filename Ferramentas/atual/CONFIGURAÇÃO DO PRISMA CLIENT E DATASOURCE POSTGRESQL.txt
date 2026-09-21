@@ -1,0 +1,221 @@
+================================================================================
+  CONFIGURAÇÃO DO PRISMA CLIENT E DATASOURCE POSTGRESQL
+  Painel de Impressoras BI
+================================================================================
+
+Data da última atualização: 05/08/2026
+
+================================================================================
+1. PRISMA 7 — MUDANÇAS RECENTES
+================================================================================
+
+O projeto foi atualizado para Prisma 7.9.1, que exige:
+
+  - Driver adapter (@prisma/adapter-pg) em vez de conexão direta
+  - Pool do pg (node-postgres) como adaptador de driver
+  - PrismaClient instanciado com o adapter
+
+ANTES (Prisma 6 ou anterior):
+  const prisma = new PrismaClient();
+
+AGORA (Prisma 7):
+  import { PrismaPg } from '@prisma/adapter-pg';
+  import { Pool } from 'pg';
+  import { PrismaClient } from '@prisma/client';
+
+  const connectionString = process.env.DATABASE_URL;
+  const pool = new Pool({ connectionString });
+  const adapter = new PrismaPg(pool);
+  const prisma = new PrismaClient({ adapter });
+
+================================================================================
+2. ARQUIVOS PRISMA
+================================================================================
+
+2.1 prisma/schema.prisma
+-------------------------
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+Modelos atuais:
+  - Unidade
+  - UnidadeAlias
+  - Impressora
+  - LeituraImpressora
+  - PerfilFranquia
+  - ConfiguracaoSLA
+  - ArquivoIngerido
+  - ConfiguracaoSistema
+  - ConfiguracaoIA  (NOVO - v0.5)
+
+2.2 prisma.config.ts
+--------------------
+Localização: W:\prisma.config.ts
+
+Configuração:
+  - Usa @prisma/adapter-pg com Pool do pg
+  - Carrega DATABASE_URL do .env.local
+  - Output do client para ../node_modules/@prisma/client
+  - Schema: ./prisma/schema.prisma
+
+IMPORTANTE: O prisma.config.ts é necessário para o Prisma 7 funcionar.
+Sem ele, o PrismaClient lança erro de "driver adapter required".
+
+================================================================================
+3. DATASOURCE POSTGRESQL
+================================================================================
+
+3.1 Conexão
+-----------
+URL: postgresql://bi_user:PrATO3fyhuJCQuGbMpSmvStWrwDmtj!t@192.168.68.162:5432/bi_dashboard
+
+Detalhes:
+  - Host: 192.168.68.162
+  - Porta: 5432
+  - Banco: bi_dashboard
+  - Usuário: bi_user
+  - Senha: PrATO3fyhuJCQuGbMpSmvStWrwDmtj!t
+
+3.2 Variável de ambiente (.env.local)
+--------------------------------------
+DATABASE_URL=postgresql://bi_user:PrATO3fyhuJCQuGbMpSmvStWrwDmtj!t@192.168.68.162:5432/bi_dashboard
+
+3.3 Estrutura do banco
+-----------------------
+Tabelas:
+  Unidade (id, nome, nomeSanitizado, perfilFranquiaId, createdAt, updatedAt)
+  UnidadeAlias (id, alias, unidadeId, createdAt)
+  Impressora (id, serial, modelo, ip, apelido, unidadeId, createdAt, updatedAt)
+  LeituraImpressora (id, dataHora, paginasTotal, paginasPB, paginasColor, status, resetPlaca, ip, serial, impressoraId, unidadeId, createdAt)
+  PerfilFranquia (id, nome, tarifaAvulsaPB, tarifaAvulsaColor, temFranquiaFixa, valorFixoMensal, cotaPB, cotaColor, excedentePB, excedenteColor, precoResmaPapel, createdAt, updatedAt)
+  ConfiguracaoSLA (id, horarioLimite, alertasAtivos, emailsDestinatarios, updatedAt)
+  ArquivoIngerido (id, nomeArquivo, dataProcessamento, tamanhoBytes, status, erroMensagem)
+  ConfiguracaoSistema (id, csvDirectoryPath, updatedAt)
+  ConfiguracaoIA (id, provedor, modelo, apiKey, endpointUrl, temperatura, maxTokens, idioma, updatedAt)  [NOVO]
+
+================================================================================
+4. COMANDOS PRISMA
+================================================================================
+
+4.1 Gerar cliente Prisma (após mudanças no schema)
+--------------------------------------------------
+npx prisma generate
+
+4.2 Sincronizar schema com banco (sem migração, apenas aplicar mudanças)
+------------------------------------------------------------------------
+npx prisma db push
+
+  Usa-se quando:
+  - O banco já existe com tabelas criadas fora do Prisma (drift)
+  - Quer adicionar novas tabelas/colunas sem criar migration files
+  - NÃO destrói dados existentes (apenas aditivo)
+
+  NÃO use quando:
+  - Quer criar migration files versionados
+  - Precisa reverter mudanças
+
+4.3 Criar migration e aplicar
+------------------------------
+npx prisma migrate dev --name <nome_da_migracao>
+
+  Cria um arquivo em prisma/migrations/ e aplica ao banco.
+
+4.4 Resetar o banco (DESTRUTIVO - todos os dados perdidos)
+-----------------------------------------------------------
+npx prisma migrate reset
+
+  ⚠️ APENAS para desenvolvimento. Nunca em produção.
+
+4.5 Studio (GUI para visualizar/editar dados)
+----------------------------------------------
+npx prisma studio
+
+4.6 Seed (dados iniciais)
+-------------------------
+npm run seed
+
+================================================================================
+5. SCRIPTS AUXILIARES COM PRISMA 7
+================================================================================
+
+Scripts .mjs usam pg.Pool diretamente (NÃO PrismaClient) porque:
+  - Prisma 7 requer driver adapter
+  - Scripts auxiliares rodam fora do contexto Next.js
+  - Usar PrismaClient sem adapter causa erro: "PrismaClientInitializationError"
+
+Exemplo de conexão em scripts .mjs:
+  import pg from 'pg';
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const result = await pool.query('SELECT * FROM "Impressora"');
+
+Scripts disponíveis:
+  - scripts/fix-c3300i-data.mjs   : Migração C3300i PB=Color
+  - scripts/limpar-banco.mjs      : Limpa todas as tabelas
+  - scripts/reset-arquivos.mjs    : Reseta status de arquivos
+  - scripts/diagnostico.mjs       : Diagnóstico do banco
+  - scripts/test-csv-parse.js     : Teste de parse de CSV
+  - scripts/test-tab-parse2.js    : Teste de parse TAB (C3300i)
+
+================================================================================
+6. PROBLEMAS CONHECIDOS E SOLUÇÕES
+================================================================================
+
+6.1 Erro: "PrismaClient was instantiated without any options. A driver adapter is required"
+------------------------------------------------------------------------------------------
+Causa: Prisma 7 não encontra o adapter.
+Solução:
+  - Verifique se prisma.config.ts existe e está correto
+  - Execute: npx prisma generate
+  - Ou em scripts .mjs, use pg.Pool diretamente
+
+6.2 Erro: "Drift detected" ao rodar prisma migrate dev
+--------------------------------------------------------
+Causa: O banco tem tabelas que não foram criadas por migrations do Prisma.
+Solução:
+  - Use npx prisma db push para sincronizar sem reset
+  - Ou: npx prisma migrate resolve --applied <nome_migration> para marcar como aplicada
+
+6.3 Erro: "NÃO h suporte para caminhos UNC" ao rodar scripts
+---------------------------------------------------------------
+Causa: CMD.EXE não suporta paths UNC (\\server\share).
+Solução: Use subst W: ... antes de rodar comandos, ou use W: no início do comando.
+
+6.4 Build com cache turbopack antigo
+--------------------------------------
+Causa: .next directory tem cache de modo dev.
+Solução: SEMPRE faça Remove-Item .next -Recurse -Force antes de npm run build.
+
+================================================================================
+7. FLUXO DE TRABALHO RECOMENDADO
+================================================================================
+
+1. Edite prisma/schema.prisma
+2. Execute: npx prisma generate
+3. Execute: npx prisma db push  (ou migrate dev se quiser migration file)
+4. Rebuild: Remove-Item .next -Recurse -Force && npm run build
+5. Reinicie: taskkill /F /IM node.exe /T && npx next start -H 0.0.0.0 -p 3000
+
+================================================================================
+8. NOTAS SOBRE O .env.local
+================================================================================
+
+Arquivo: W:\.env.local
+Conteúdo atual:
+  DATABASE_URL=postgresql://bi_user:PrATO3fyhuJCQuGbMpSmvStWrwDmtj!t@192.168.68.162:5432/bi_dashboard
+  CSV_DIRECTORY_PATH=G:\Meu Drive\Relatorios_Impressoras
+  SMTP_HOST=<pendente>
+  SMTP_PORT=587
+  SMTP_USER=<pendente>
+  SMTP_PASS=<pendente>
+  SMTP_FROM=<pendente>
+  SMTP_TO=<pendente>
+
+IMPORTANTE: As credenciais SMTP estão com placeholders. Os alertas de e-mail
+não funcionam até que credenciais reais sejam configuradas.
+
+================================================================================
